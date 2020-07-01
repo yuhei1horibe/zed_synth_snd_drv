@@ -23,6 +23,9 @@
 #include <linux/of_device.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
+#include <asm/io.h>
+#include <asm/uaccess.h>
+#include <linux/uio_driver.h>
 
 #include "../codecs/adau17x1.h"
 #include "../xilinx/xlnx_snd_common.h"
@@ -31,10 +34,17 @@
 #define XLNX_MAX_PL_SND_DEV 5
 
 struct zed_pl_card_data {
-	u32 mclk_val;
-	u32 mclk_ratio;
-	int xlnx_snd_dev_id;
-	struct clk *mclk;
+    // Sound card data
+	u32                  mclk_val;
+	u32                  mclk_ratio;
+	int                  xlnx_snd_dev_id;
+	struct clk          *mclk;
+    struct snd_soc_card *card;
+
+    // UIO data
+    void __iomem*    addr_base;
+    unsigned long    size;
+	struct uio_info* info;
 };
 
 static DEFINE_IDA(zed_snd_card_dev);
@@ -140,7 +150,6 @@ static int zed_snd_card_hw_params(struct snd_pcm_substream *substream,
         return ret;
     }
 
-
     //ret = snd_soc_dai_set_bclk_ratio(codec_dai, 16);
     //if (ret) {
     //    return ret;
@@ -157,6 +166,7 @@ static const struct snd_soc_ops zed_snd_card_ops = {
     .hw_params = zed_snd_card_hw_params,
 };
 
+// CPU DAI is dummy because I2S signals are coming from PL
 SND_SOC_DAILINK_DEFS(zed_synth_out,
              DAILINK_COMP_ARRAY(COMP_DUMMY()),
              DAILINK_COMP_ARRAY(COMP_CODEC(NULL, "adau-hifi")),
@@ -169,45 +179,48 @@ static struct snd_soc_dai_link zed_snd_dai = {
         .ops = &zed_snd_card_ops,
 };
 
+// Register this device as both sound card, and UIO
 static int zed_snd_probe(struct platform_device *pdev)
 {
-    //u32 i;
     size_t sz;
     char *buf;
     int ret;
     struct snd_soc_dai_link *dai;
     struct zed_pl_card_data *prv;
-    //struct platform_device *iface_pdev;
+    struct resource*         res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 
     struct snd_soc_card *card;
-    //struct device_node *node = pdev->dev.platform_data;
 
-    // This is for CODEC (ADAU1761)
-    // New field is added to device tree
+    // ADAU1761 Audio CODEC device node
     struct device_node *pcodec;
 
+    dev_info(&pdev->dev, "Probe\n");
     card = devm_kzalloc(&pdev->dev, sizeof(struct snd_soc_card),
                 GFP_KERNEL);
     if (!card)
         return -ENOMEM;
 
-    dev_info(&pdev->dev, "Probe\n");
-
     card->dev = &pdev->dev;
     card->dai_link = devm_kzalloc(card->dev,
                       sizeof(*dai),
                       GFP_KERNEL);
-    if (!card->dai_link)
-        return -ENOMEM;
+    if (!card->dai_link) {
+        ret = -ENOMEM;
+        goto unreg_class;
+    }
 
     prv = devm_kzalloc(card->dev,
                sizeof(struct zed_pl_card_data),
                GFP_KERNEL);
-    if (!prv)
-        return -ENOMEM;
+    if (!prv) {
+        ret = -ENOMEM;
+        goto unreg_class;
+    }
+    prv->card = card;
 
     card->num_links = 0;
 
+    // Audio CODEC device node
     pcodec = of_parse_phandle(pdev->dev.of_node, "audio-codec", 0);
 
     if (!pcodec) {
@@ -271,24 +284,89 @@ static int zed_snd_probe(struct platform_device *pdev)
                   prv->xlnx_snd_dev_id);
         return ret;
     }
-    dev_set_drvdata(card->dev, prv);
     dev_info(card->dev, "%s registered\n", card->name);
 
+    if (!res) {
+        dev_err(&pdev->dev, "Failed to get platform resource info from device tree.\n");
+        ret = -EINVAL;
+    }
+
+    // UIO registration
+    if(res->start <= 0){
+        dev_err(&pdev->dev, "Failed to get device address from device tree.\n");
+        ret = -EINVAL;
+        goto unreg_class;
+    }
+    else{
+        dev_info(&pdev->dev, "UIO register base address: %lx\n", (unsigned long)res->start);
+        prv->size      = (unsigned long)(resource_size(res));
+        prv->addr_base = (void __iomem*)ioremap(res->start, prv->size);
+    }
+
+    // UIO info
+	prv->info = kzalloc(sizeof(struct uio_info), GFP_KERNEL);
+	if (!prv->info) {
+        ret = -ENOMEM;
+        goto unreg_class;
+    }
+
+    prv->info->name                 = zed_snd_card_name;
+	prv->info->mem[0].memtype       = UIO_MEM_PHYS;
+	prv->info->mem[0].internal_addr = prv->addr_base;
+	prv->info->mem[0].addr    = res->start;
+	prv->info->mem[0].size    = prv->size;
+
+	prv->info->version   = "0.0.1";
+	prv->info->irq       = UIO_IRQ_NONE;
+	prv->info->irq_flags = 0;
+	prv->info->handler   = NULL;
+
+    // Register device as UIO device
+	if (uio_register_device(&pdev->dev, prv->info)) {
+        dev_err(&pdev->dev, "Failed to register device as UIO device.\n");
+        ret = -EINVAL;
+        goto unreg_class;
+    }
+    dev_set_drvdata(card->dev, prv);
+
     return 0;
+
+unreg_class:
+    if (card) {
+        kfree(card->dai_link);
+        kfree(card->name);
+        kfree(card);
+    }
+    if (prv) {
+        kfree(prv->info);
+        kfree(prv);
+    }
+    return ret;
 }
 
 static int zed_snd_remove(struct platform_device *pdev)
 {
-    struct zed_pl_card_data *pdata = dev_get_drvdata(&pdev->dev);
+    struct zed_pl_card_data *prv = dev_get_drvdata(&pdev->dev);
 
-    ida_simple_remove(&zed_snd_card_dev, pdata->xlnx_snd_dev_id);
+    ida_simple_remove(&zed_snd_card_dev, prv->xlnx_snd_dev_id);
+
+    // Unregister UIO device
+	uio_unregister_device(prv->info);
+	iounmap(prv->addr_base);
+    kfree(prv->info);
+    kfree(prv);
+
+    // Release sound card device data
+    kfree(prv->card->dai_link);
+    kfree(prv->card->name);
+    kfree(prv->card);
     return 0;
 }
 
 // Device match table
 static const struct of_device_id zed_synth_of_ids[] = 
 {
-    { .compatible = "xlnx,zed-synth-card" },
+    { .compatible = "xlnx,my-synth-1.0" },
     { }
 };
 
