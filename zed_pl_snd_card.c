@@ -30,22 +30,7 @@
 #include "../codecs/adau17x1.h"
 #include "../xilinx/xlnx_snd_common.h"
 
-#define I2S_CLOCK_RATIO 384
-#define XLNX_MAX_PL_SND_DEV 5
-
-struct zed_pl_card_data {
-    // Sound card data
-	u32                  mclk_val;
-	u32                  mclk_ratio;
-	int                  xlnx_snd_dev_id;
-	struct clk          *mclk;
-    struct snd_soc_card *card;
-
-    // UIO data
-    void __iomem*    addr_base;
-    unsigned long    size;
-	struct uio_info* info;
-};
+#include "zed_pl_synth.h"
 
 static DEFINE_IDA(zed_snd_card_dev);
 
@@ -70,6 +55,7 @@ static const struct snd_soc_dapm_route zed_snd_routes[] = {
 
 static const char *zed_snd_card_name = "zed-pl-snd-card";
 
+// Audio CODEC hardware parameter
 static int zed_snd_card_hw_params(struct snd_pcm_substream *substream,
                    struct snd_pcm_hw_params *params)
 {
@@ -122,7 +108,7 @@ static int zed_snd_card_hw_params(struct snd_pcm_substream *substream,
     case 24000:
     case 32000:
     case 96000:
-        pll_rate = 48000 * 1024;
+        pll_rate = 48000 * I2S_CLOCK_RATIO;
         break;
     case 44100:
     case 7350:
@@ -173,11 +159,13 @@ SND_SOC_DAILINK_DEFS(zed_synth_out,
              DAILINK_COMP_ARRAY(COMP_DUMMY()));
 
 static struct snd_soc_dai_link zed_snd_dai = {
-        .name = "zed-synth_out",
-        .stream_name = "zed-synth",
+        .name        = "zed-synth",
+        .stream_name = "zed-synth_out",
         SND_SOC_DAILINK_REG(zed_synth_out),
         .ops = &zed_snd_card_ops,
 };
+
+// MIDI initialization
 
 // Register this device as both sound card, and UIO
 static int zed_snd_probe(struct platform_device *pdev)
@@ -194,7 +182,9 @@ static int zed_snd_probe(struct platform_device *pdev)
     // ADAU1761 Audio CODEC device node
     struct device_node *pcodec;
 
-    dev_info(&pdev->dev, "Probe\n");
+    // For MIDI
+	struct snd_seq_port_callback callbacks;
+
     card = devm_kzalloc(&pdev->dev, sizeof(struct snd_soc_card),
                 GFP_KERNEL);
     if (!card)
@@ -216,6 +206,7 @@ static int zed_snd_probe(struct platform_device *pdev)
         ret = -ENOMEM;
         goto unreg_class;
     }
+    prv->dev = &pdev->dev;
     prv->card = card;
 
     card->num_links = 0;
@@ -224,16 +215,16 @@ static int zed_snd_probe(struct platform_device *pdev)
     pcodec = of_parse_phandle(pdev->dev.of_node, "audio-codec", 0);
 
     if (!pcodec) {
-        dev_err(card->dev, "Audio CODEC node not found\n");
+        dev_err(card->dev, "Audio CODEC node not found in device tree.\n");
         of_node_put(pcodec);
         return -ENODEV;
     }
-    dev_info(card->dev, "zed-synth-card: ADAU1761 CODEC found\n");
+    dev_info(card->dev, "ADAU1761 CODEC node found.\n");
 
     // Get audio master clock node
     prv->mclk = devm_clk_get(&pdev->dev, "aud_mclk");
     if (IS_ERR(prv->mclk)) {
-        dev_err(card->dev, "aud_mclk not found.\n");
+        dev_err(card->dev, "aud_mclk not found in device tree.\n");
         return PTR_ERR(prv->mclk);
     }
 
@@ -245,8 +236,7 @@ static int zed_snd_probe(struct platform_device *pdev)
     //dai->cpus->of_node = node;
     card->num_links++;
     snd_soc_card_set_drvdata(card, prv);
-    dev_dbg(card->dev, "%s registered\n",
-        card->dai_link[0].name);
+    dev_dbg(card->dev, "%s registered\n", card->dai_link[0].name);
 
     /*
      *  Example : zed-pl-snd-card-0
@@ -259,14 +249,14 @@ static int zed_snd_probe(struct platform_device *pdev)
     if (!buf)
         return -ENOMEM;
 
-    prv->xlnx_snd_dev_id = ida_simple_get(&zed_snd_card_dev, 0,
-                          XLNX_MAX_PL_SND_DEV,
+    prv->zed_pl_snd_dev_id = ida_simple_get(&zed_snd_card_dev, 0,
+                          ZED_MAX_PL_SND_DEV,
                           GFP_KERNEL);
-    if (prv->xlnx_snd_dev_id < 0)
-        return prv->xlnx_snd_dev_id;
+    if (prv->zed_pl_snd_dev_id < 0)
+        return prv->zed_pl_snd_dev_id;
 
     snprintf(buf, sz, "%s-%d", zed_snd_card_name,
-         prv->xlnx_snd_dev_id);
+         prv->zed_pl_snd_dev_id);
     card->name = buf;
 
     // Widgets and routes
@@ -281,7 +271,7 @@ static int zed_snd_probe(struct platform_device *pdev)
         dev_err(card->dev, "%s registration failed\n",
             card->name);
         ida_simple_remove(&zed_snd_card_dev,
-                  prv->xlnx_snd_dev_id);
+                  prv->zed_pl_snd_dev_id);
         return ret;
     }
     dev_info(card->dev, "%s registered\n", card->name);
@@ -298,7 +288,7 @@ static int zed_snd_probe(struct platform_device *pdev)
         goto unreg_class;
     }
     else{
-        dev_info(&pdev->dev, "UIO register base address: %lx\n", (unsigned long)res->start);
+        //dev_info(&pdev->dev, "UIO register base address: %lx\n", (unsigned long)res->start);
         prv->size      = (unsigned long)(resource_size(res));
         prv->addr_base = (void __iomem*)ioremap(res->start, prv->size);
     }
@@ -327,6 +317,54 @@ static int zed_snd_probe(struct platform_device *pdev)
         ret = -EINVAL;
         goto unreg_class;
     }
+
+    // MIDI setup
+    // Channel allocation
+	prv->chset = snd_midi_channel_alloc_set(ZED_PL_SYNTH_MIDI_CH);
+    if (!prv->chset) {
+        dev_err(&pdev->dev, "Failed to allocate midi channel.\n");
+        ret = -EINVAL;
+        goto unreg_class;
+    }
+
+    // Kernel sequencer client
+    prv->seq_client = snd_seq_create_kernel_client(prv->card->snd_card, prv->zed_pl_snd_dev_id, "Zedbaord PL synth");
+    if (prv->seq_client < 0) {
+        dev_err(&pdev->dev, "Failed to create sequencer client.\n");
+        goto unreg_class;
+    }
+
+    // Registration of sequencer callback operations
+	memset(&callbacks, 0, sizeof(callbacks));
+	callbacks.owner        = THIS_MODULE;
+	callbacks.use          = zed_pl_synth_use;
+	callbacks.unuse        = zed_pl_synth_unuse;
+	callbacks.event_input  = zed_pl_synth_event_input;
+	callbacks.private_free = zed_pl_synth_free_port;
+	callbacks.private_data = prv;
+
+    // Create port
+    prv->chset->client = prv->seq_client;
+	prv->chset->port   = snd_seq_event_port_attach(prv->seq_client, &callbacks,
+						      SNDRV_SEQ_PORT_CAP_WRITE |
+						      SNDRV_SEQ_PORT_CAP_SUBS_WRITE,
+						      SNDRV_SEQ_PORT_TYPE_MIDI_GENERIC |
+						      SNDRV_SEQ_PORT_TYPE_MIDI_GM |
+						      SNDRV_SEQ_PORT_TYPE_DIRECT_SAMPLE |
+						      SNDRV_SEQ_PORT_TYPE_HARDWARE |
+						      SNDRV_SEQ_PORT_TYPE_SYNTHESIZER,
+						      ZED_PL_SYNTH_MIDI_CH,
+                              ZED_PL_SYNTH_NUM_UNITS,
+						      "Zedboard PL synth port");
+
+    if (prv->chset->port < 0) {
+        dev_err(&pdev->dev, "Failed to attach sequencer port.");
+		snd_midi_channel_free_set(prv->chset);
+        return prv->chset->port;
+    }
+
+    dev_info(&pdev->dev, "Zedboard PL synthesizer midi module registered");
+
     dev_set_drvdata(card->dev, prv);
 
     return 0;
@@ -340,6 +378,12 @@ unreg_class:
     if (prv) {
         kfree(prv->info);
         kfree(prv);
+        if (prv->chset) {
+            snd_midi_channel_free_set(prv->chset);
+        }
+    }
+    if (prv->seq_client) {
+        snd_seq_delete_kernel_client(prv->seq_client);
     }
     return ret;
 }
@@ -348,13 +392,21 @@ static int zed_snd_remove(struct platform_device *pdev)
 {
     struct zed_pl_card_data *prv = dev_get_drvdata(&pdev->dev);
 
-    ida_simple_remove(&zed_snd_card_dev, prv->xlnx_snd_dev_id);
+    ida_simple_remove(&zed_snd_card_dev, prv->zed_pl_snd_dev_id);
 
     // Unregister UIO device
 	uio_unregister_device(prv->info);
 	iounmap(prv->addr_base);
+
+    // Free up MIDI resources
     kfree(prv->info);
     kfree(prv);
+    if (prv->chset) {
+        snd_midi_channel_free_set(prv->chset);
+    }
+    if (prv->seq_client) {
+        snd_seq_delete_kernel_client(prv->seq_client);
+    }
 
     // Release sound card device data
     kfree(prv->card->dai_link);
