@@ -74,7 +74,8 @@ static int zed_snd_card_hw_params(struct snd_pcm_substream *substream,
     dev_info(rtd->dev, "hw_params\n");
 
     ch = params_channels(params);
-    data_width = params_width(params);
+    //data_width = params_width(params);
+    data_width = 24;
     sample_rate = params_rate(params);
 
 	/* only 2 channels supported */
@@ -118,6 +119,8 @@ static int zed_snd_card_hw_params(struct snd_pcm_substream *substream,
     case 29400:
     case 88200:
         // Not supported
+        pll_rate = 48000 * I2S_CLOCK_RATIO;
+        break;
     default:
         return -EINVAL;
     }
@@ -208,6 +211,9 @@ static int zed_snd_probe(struct platform_device *pdev)
     }
     prv->dev = &pdev->dev;
     prv->card = card;
+
+    // MUTEX
+    mutex_init(&prv->access_mutex);
 
     card->num_links = 0;
 
@@ -326,6 +332,7 @@ static int zed_snd_probe(struct platform_device *pdev)
         ret = -EINVAL;
         goto unreg_class;
     }
+    prv->chset->private_data = prv;
 
     // Kernel sequencer client
     prv->seq_client = snd_seq_create_kernel_client(prv->card->snd_card, prv->zed_pl_snd_dev_id, "Zedbaord PL synth");
