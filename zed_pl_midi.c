@@ -326,6 +326,7 @@ void zed_pl_synth_control(void *p, int type, struct snd_midi_channel *chan)
     struct zed_pl_card_data *prv  = p;
     struct zed_pl_unit_reg  *regs = NULL;
     int ch = chan->number;
+    struct note_alloc_tracker *wp;
 
     if (prv == NULL) {
         return ;
@@ -337,28 +338,24 @@ void zed_pl_synth_control(void *p, int type, struct snd_midi_channel *chan)
     }
 
     // Control change
-    if (type == SNDRV_SEQ_EVENT_CONTROLLER) {
-        struct note_alloc_tracker *wp;
+    mutex_lock(&prv->access_mutex);
+    zed_ch_data[ch].vol = chan->gm_volume;
+    zed_ch_data[ch].exp = chan->gm_expression;
+    zed_ch_data[ch].pan = chan->gm_pan;
+    zed_ch_data[ch].mod = chan->gm_modulation_wheel_lsb;
 
-        mutex_lock(&prv->access_mutex);
-        zed_ch_data[ch].vol = chan->gm_volume;
-        zed_ch_data[ch].exp = chan->gm_expression;
-        zed_ch_data[ch].pan = chan->gm_pan;
-        zed_ch_data[ch].mod = chan->gm_modulation_wheel_lsb;
+    // Change volume (TODO: Frequency)
+    list_for_each_entry (wp, &zed_ch_data[ch].note_alloc.list, list) {
+        int unit_no = wp->unit_no;
 
-        // Change volume (TODO: Frequency)
-        list_for_each_entry (wp, &zed_ch_data[ch].note_alloc.list, list) {
-            int unit_no = wp->unit_no;
+        zed_pl_synth_calc_vol(ch, wp->vel);
+        zed_ch_data[ch].unit_reg.amp_reg.bit.amp_l   = zed_ch_data[ch].vol_l;
+        zed_ch_data[ch].unit_reg.amp_reg.bit.amp_r   = zed_ch_data[ch].vol_r;
 
-            zed_pl_synth_calc_vol(ch, wp->vel);
-            zed_ch_data[ch].unit_reg.amp_reg.bit.amp_l   = zed_ch_data[ch].vol_l;
-            zed_ch_data[ch].unit_reg.amp_reg.bit.amp_r   = zed_ch_data[ch].vol_r;
-
-            // Write volume
-            regs[unit_no].amp_reg.amp_reg_all = zed_ch_data[ch].unit_reg.amp_reg.amp_reg_all;
-        }
-        mutex_unlock(&prv->access_mutex);
+        // Write volume
+        regs[unit_no].amp_reg.amp_reg_all = zed_ch_data[ch].unit_reg.amp_reg.amp_reg_all;
     }
+    mutex_unlock(&prv->access_mutex);
 }
 
 void zed_pl_synth_nrpn(void *p, struct snd_midi_channel *chan, struct snd_midi_channel_set *chset)
