@@ -115,8 +115,8 @@ static void zed_pl_synth_calc_vol(int ch, int vel)
     pan = zed_ch_data[ch].pan;
 
     calc = ((int32_t)vol * vel * exp) / 16129; // 127 ^ 2
-    zed_ch_data[ch].vol_l = calc * (127 - pan) / 64;
-    zed_ch_data[ch].vol_r = calc * pan / 64;
+    zed_ch_data[ch].vol_l = (calc * (128 - pan)) / 64;
+    zed_ch_data[ch].vol_r = (calc * pan) / 64;
 
     return ;
 }
@@ -293,7 +293,7 @@ void zed_pl_synth_note_off(void *p, int note, int vel, struct snd_midi_channel *
 
     // Find target unit
     unit_no = free_unit(chan->number, note);
-    if (unit_no >= -1) {
+    if (unit_no >= 0) {
         struct zed_pl_unit_reg *regs = prv->addr_base;
         const int ch = chan->number;
 
