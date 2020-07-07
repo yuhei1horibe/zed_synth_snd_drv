@@ -65,5 +65,6 @@ void zed_pl_synth_control(void *p, int type, struct snd_midi_channel *chan);
 void zed_pl_synth_nrpn(void *p, struct snd_midi_channel *chan, struct snd_midi_channel_set *chset);
 void zed_pl_synth_sysex(void *p, unsigned char *buf, int len, int parsed, struct snd_midi_channel_set *chset);
 
-// Initialization
+// Initialization and release
 void zed_pl_synth_midi_init(void);
+void zed_pl_synth_release(struct zed_pl_card_data *prv);

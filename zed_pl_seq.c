@@ -59,6 +59,7 @@ int zed_pl_synth_unuse(void *private_data, struct snd_seq_port_subscribe *info)
     int ret = 0;
 
     mutex_lock(&prv->access_mutex);
+    zed_pl_synth_release(prv);
     prv->busy = 0;
     if (info->sender.client != SNDRV_SEQ_CLIENT_SYSTEM) {
         module_put(prv->card->snd_card->module);
@@ -71,6 +72,9 @@ void zed_pl_synth_free_port(void *private_data)
 {
     struct zed_pl_card_data *prv = (struct zed_pl_card_data*)private_data;
 
+    mutex_lock(&prv->access_mutex);
+    zed_pl_synth_release(prv);
+    mutex_unlock(&prv->access_mutex);
     snd_midi_channel_free_set(prv->chset);
 }
 

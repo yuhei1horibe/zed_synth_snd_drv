@@ -45,8 +45,8 @@ struct zed_pl_unit_reg {
     union {
         uint32_t freq_reg_all;
         struct {
-            uint16_t freq;
-            uint16_t rsvd;
+            uint32_t freq : 16;
+            uint32_t rsvd : 16;
         } bit;
     } freq_reg;
     union {
@@ -60,17 +60,17 @@ struct zed_pl_unit_reg {
     union {
         uint32_t vca_eg_reg_all;
         struct {
-            uint8_t vca_attack;
-            uint8_t vca_decay;
-            uint8_t vca_sustain;
-            uint8_t vca_release;
+            uint32_t vca_attack  : 8;
+            uint32_t vca_decay   : 8;
+            uint32_t vca_sustain : 8;
+            uint32_t vca_release : 8;
         } bit;
     } vca_eg_reg;
     union {
         uint32_t amp_reg_all;
         struct {
-            uint16_t amp_l;
-            uint16_t amp_r;
+            uint32_t amp_l : 16;
+            uint32_t amp_r : 16;
         } bit;
     } amp_reg;
 };
@@ -78,6 +78,7 @@ struct zed_pl_unit_reg {
 // Linked list is for dynamic unit allocation
 struct note_alloc_tracker {
     int8_t note;
+    int8_t vel;
     int8_t unit_no;
     struct list_head list;
 };
@@ -85,14 +86,42 @@ struct note_alloc_tracker {
 // Per channel data
 struct zed_pl_channel_data {
     struct zed_pl_unit_reg    unit_reg;
-    int32_t                   vol;
+    int8_t                    vol;
+    int8_t                    exp;
+    int8_t                    pan;
+    int8_t                    mod;
+
+    // Calculated volume
+    int16_t                   vol_l;
+    int16_t                   vol_r;
     struct note_alloc_tracker note_alloc;
 };
 
 // Per MIDI channel data
 static struct zed_pl_channel_data zed_ch_data[ZED_PL_SYNTH_MIDI_CH];
 
-void zed_pl_synth_midi_init()
+static void zed_pl_synth_calc_vol(int ch, int vel)
+{
+    int8_t  vol;
+    int8_t  exp;
+    int8_t  pan;
+    int32_t calc;
+
+    if ((ch >=ZED_PL_SYNTH_MIDI_CH) || (ch < 0)) {
+        return ;
+    }
+    vol = zed_ch_data[ch].vol;
+    exp = zed_ch_data[ch].exp;
+    pan = zed_ch_data[ch].pan;
+
+    calc = ((int32_t)vol * vel * exp) / 16129; // 127 ^ 2
+    zed_ch_data[ch].vol_l = calc * (127 - pan) / 64;
+    zed_ch_data[ch].vol_r = calc * pan / 64;
+
+    return ;
+}
+
+void zed_pl_synth_midi_init(void)
 {
     int i;
     memset(zed_ch_data, 0, sizeof(struct zed_pl_channel_data) * ZED_PL_SYNTH_MIDI_CH);
@@ -114,22 +143,47 @@ void zed_pl_synth_midi_init()
     }
 }
 
-void zed_pl_synth_release(void)
+void zed_pl_synth_release(struct zed_pl_card_data *prv)
 {
     struct note_alloc_tracker *wp1, *wp2;
     int i;
+    struct zed_pl_unit_reg *regs = NULL;
+
+    if (!prv) {
+        return ;
+    }
+    regs = prv->addr_base;
 
     // Free up list nodes
     for (i = 0; i < ZED_PL_SYNTH_MIDI_CH; i++) {
         list_for_each_entry_safe(wp1, wp2, &(zed_ch_data[i].note_alloc.list), list) {
+            int unit_no = wp1->unit_no;
             list_del(&(wp1->list));
             kfree(wp1);
+
+            // Release unit
+            zed_ch_data[i].unit_reg.freq_reg.bit.freq = 0;
+            zed_ch_data[i].unit_reg.ctl_reg.bit.trigger = false;
+            // NOTE: For release, don't touch amplitude
+            //zed_ch_data[ch].unit_reg.amp_reg.bit.amp_l = 0;
+            //zed_ch_data[ch].unit_reg.amp_reg.bit.amp_r = 0;
+
+            // Write to register
+            regs[unit_no] = zed_ch_data[i].unit_reg;
         }
+        INIT_LIST_HEAD(&zed_ch_data[i].note_alloc.list);
     }
 }
 
+// MIDI reset event (GM/GS/XG reset)
+void zed_pl_synth_midi_reset_event(struct zed_pl_card_data *prv)
+{
+    zed_pl_synth_release(prv);
+    zed_pl_synth_midi_init();
+}
+
 // Allocate free synthesizer unit, and add to note tracker
-static int alloc_free_unit(void* reg_base, int ch, int note)
+static int alloc_free_unit(void* reg_base, int ch, int note, int vel)
 {
     static int cur_pos = 0; // For round robin
     struct zed_pl_unit_reg *regs = reg_base;
@@ -150,6 +204,7 @@ static int alloc_free_unit(void* reg_base, int ch, int note)
             cur_pos = reg_off;
             note_track->unit_no = cur_pos;
             note_track->note    = note;
+            note_track->vel     = vel;
 
             // Add entry for note tracker
             list_add_tail(&(note_track->list), &zed_ch_data[ch].note_alloc.list);
@@ -181,16 +236,18 @@ void zed_pl_synth_note_on(void *p, int note, int vel, struct snd_midi_channel *c
     mutex_lock(&prv->access_mutex);
 
     // Allocate unit and add entry to tracker
-    unit_no = alloc_free_unit(prv->addr_base, ch, note);
-    if (unit_no >= -1) {
+    unit_no = alloc_free_unit(prv->addr_base, ch, note, vel);
+    if (unit_no >= 0) {
         struct zed_pl_unit_reg *regs = prv->addr_base;
+
+        // Calculate volume
+        zed_pl_synth_calc_vol(ch, vel);
 
         // Set data
         zed_ch_data[ch].unit_reg.freq_reg.bit.freq   = note_freq[note];
         zed_ch_data[ch].unit_reg.ctl_reg.bit.trigger = true;
-        // TODO: Pan
-        zed_ch_data[ch].unit_reg.amp_reg.bit.amp_l   = (zed_ch_data[ch].vol * vel) / 127;
-        zed_ch_data[ch].unit_reg.amp_reg.bit.amp_r   = (zed_ch_data[ch].vol * vel) / 127;
+        zed_ch_data[ch].unit_reg.amp_reg.bit.amp_l   = zed_ch_data[ch].vol_l;
+        zed_ch_data[ch].unit_reg.amp_reg.bit.amp_r   = zed_ch_data[ch].vol_r;
 
         // Write to register
         regs[unit_no] = zed_ch_data[ch].unit_reg;
@@ -255,14 +312,53 @@ void zed_pl_synth_note_off(void *p, int note, int vel, struct snd_midi_channel *
 
 void zed_pl_synth_key_press(void *p, int note, int vel, struct snd_midi_channel *chan)
 {
+    zed_pl_synth_note_on(p, note, vel, chan);
 }
 
 void zed_pl_synth_terminate_note(void *p, int note, struct snd_midi_channel *chan)
 {
+    zed_pl_synth_note_off(p, note, 0, chan);
 }
 
+// Handle control change and program change
 void zed_pl_synth_control(void *p, int type, struct snd_midi_channel *chan)
 {
+    struct zed_pl_card_data *prv  = p;
+    struct zed_pl_unit_reg  *regs = NULL;
+    int ch = chan->number;
+
+    if (prv == NULL) {
+        return ;
+    }
+    regs = prv->addr_base;
+
+    if ((ch >= ZED_PL_SYNTH_MIDI_CH) || (ch < 0)) {
+        return ;
+    }
+
+    // Control change
+    if (type == SNDRV_SEQ_EVENT_CONTROLLER) {
+        struct note_alloc_tracker *wp;
+
+        mutex_lock(&prv->access_mutex);
+        zed_ch_data[ch].vol = chan->gm_volume;
+        zed_ch_data[ch].exp = chan->gm_expression;
+        zed_ch_data[ch].pan = chan->gm_pan;
+        zed_ch_data[ch].mod = chan->gm_modulation_wheel_lsb;
+
+        // Change volume (TODO: Frequency)
+        list_for_each_entry (wp, &zed_ch_data[ch].note_alloc.list, list) {
+            int unit_no = wp->unit_no;
+
+            zed_pl_synth_calc_vol(ch, wp->vel);
+            zed_ch_data[ch].unit_reg.amp_reg.bit.amp_l   = zed_ch_data[ch].vol_l;
+            zed_ch_data[ch].unit_reg.amp_reg.bit.amp_r   = zed_ch_data[ch].vol_r;
+
+            // Write volume
+            regs[unit_no].amp_reg.amp_reg_all = zed_ch_data[ch].unit_reg.amp_reg.amp_reg_all;
+        }
+        mutex_unlock(&prv->access_mutex);
+    }
 }
 
 void zed_pl_synth_nrpn(void *p, struct snd_midi_channel *chan, struct snd_midi_channel_set *chset)
@@ -271,4 +367,16 @@ void zed_pl_synth_nrpn(void *p, struct snd_midi_channel *chan, struct snd_midi_c
 
 void zed_pl_synth_sysex(void *p, unsigned char *buf, int len, int parsed, struct snd_midi_channel_set *chset)
 {
+    struct zed_pl_card_data *prv  = p;
+
+    // Handle GM/GS/XG resets only
+    switch (parsed) {
+    case SNDRV_MIDI_SYSEX_GM_ON:
+    case SNDRV_MIDI_MODE_GS:
+    case SNDRV_MIDI_MODE_XG:
+        mutex_lock(&prv->access_mutex);
+        zed_pl_synth_midi_reset_event(p);
+        mutex_unlock(&prv->access_mutex);
+        break;
+    }
 }
