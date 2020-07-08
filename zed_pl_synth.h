@@ -27,6 +27,14 @@
 #define ZED_PL_SYNTH_NUM_UNITS 32
 #define ZED_PL_SYNTH_MIDI_CH 16
 
+// Linked list is for dynamic unit allocation
+struct note_alloc_tracker {
+    int8_t note;
+    int8_t vel;
+    int8_t unit_no;
+    struct list_head list;
+};
+
 struct zed_pl_card_data {
     // Sound card data
 	uint32_t             mclk_val;
@@ -43,6 +51,7 @@ struct zed_pl_card_data {
 	struct mutex access_mutex;
     int seq_client;
     int busy;
+    struct note_alloc_tracker alloc_pool;
 
     // UIO data
     void __iomem*    addr_base;
@@ -66,5 +75,7 @@ void zed_pl_synth_nrpn(void *p, struct snd_midi_channel *chan, struct snd_midi_c
 void zed_pl_synth_sysex(void *p, unsigned char *buf, int len, int parsed, struct snd_midi_channel_set *chset);
 
 // Initialization and release
+int zed_pl_synth_init_alloc_pool(struct zed_pl_card_data *prv);
+void zed_pl_synth_release_alloc_pool(struct zed_pl_card_data *prv);
 void zed_pl_synth_midi_init(void);
 void zed_pl_synth_release(struct zed_pl_card_data *prv);

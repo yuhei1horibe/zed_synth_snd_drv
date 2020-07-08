@@ -75,14 +75,6 @@ struct zed_pl_unit_reg {
     } amp_reg;
 };
 
-// Linked list is for dynamic unit allocation
-struct note_alloc_tracker {
-    int8_t note;
-    int8_t vel;
-    int8_t unit_no;
-    struct list_head list;
-};
-
 // Per channel data
 struct zed_pl_channel_data {
     struct zed_pl_unit_reg    unit_reg;
@@ -99,6 +91,46 @@ struct zed_pl_channel_data {
 
 // Per MIDI channel data
 static struct zed_pl_channel_data zed_ch_data[ZED_PL_SYNTH_MIDI_CH];
+
+void zed_pl_synth_release_alloc_pool(struct zed_pl_card_data *prv)
+{
+    struct note_alloc_tracker *wp1, *wp2;
+    struct zed_pl_unit_reg *regs = NULL;
+
+    if (!prv) {
+        return ;
+    }
+    regs = prv->addr_base;
+
+    // Release all notes
+    zed_pl_synth_release(prv);
+
+    // Free up all list nodes
+    list_for_each_entry_safe(wp1, wp2, &(prv->alloc_pool.list), list) {
+        list_del(&(wp1->list));
+        kfree(wp1);
+    }
+    INIT_LIST_HEAD(&prv->alloc_pool.list);
+}
+
+// MIDI pool allocation
+int zed_pl_synth_init_alloc_pool(struct zed_pl_card_data *prv)
+{
+    int i;
+    struct note_alloc_tracker *wp = NULL;
+
+    INIT_LIST_HEAD(&prv->alloc_pool.list);
+
+    for (i = 0; i < ZED_PL_SYNTH_NUM_UNITS; i++) {
+        wp = kzalloc(sizeof(struct note_alloc_tracker), GFP_KERNEL);
+        if (wp == NULL) {
+            zed_pl_synth_release_alloc_pool(prv);
+            return -1;
+        }
+        list_add_tail(&wp->list, &prv->alloc_pool.list);
+    }
+    return 0;
+}
 
 static void zed_pl_synth_calc_vol(int ch, int vel)
 {
@@ -158,8 +190,8 @@ void zed_pl_synth_release(struct zed_pl_card_data *prv)
     for (i = 0; i < ZED_PL_SYNTH_MIDI_CH; i++) {
         list_for_each_entry_safe(wp1, wp2, &(zed_ch_data[i].note_alloc.list), list) {
             int unit_no = wp1->unit_no;
-            list_del(&(wp1->list));
-            kfree(wp1);
+            // Return the node to the pool
+            list_move_tail(&(wp1->list), &(prv->alloc_pool.list));
 
             // Release unit
             zed_ch_data[i].unit_reg.freq_reg.bit.freq = 0;
@@ -183,21 +215,22 @@ void zed_pl_synth_midi_reset_event(struct zed_pl_card_data *prv)
 }
 
 // Allocate free synthesizer unit, and add to note tracker
-static int alloc_free_unit(void* reg_base, int ch, int note, int vel)
+static int alloc_free_unit(struct zed_pl_card_data *prv, int ch, int note, int vel)
 {
     static int cur_pos = 0; // For round robin
-    struct zed_pl_unit_reg *regs = reg_base;
+    struct zed_pl_unit_reg *regs = NULL;
     int i;
 
-    if (!reg_base) {
+    if (!prv || !prv->addr_base) {
         return -1;
     }
+    regs = prv->addr_base;
 
     for (i = 1; i <= ZED_PL_SYNTH_NUM_UNITS; i++) {
         int reg_off = (cur_pos + i) % ZED_PL_SYNTH_NUM_UNITS;
         if (regs[reg_off].ctl_reg.bit.trigger == false) {
-            struct note_alloc_tracker *note_track = kzalloc(sizeof(struct note_alloc_tracker), GFP_KERNEL);
-            if (!note) {
+            struct note_alloc_tracker *note_track = list_first_entry(&(prv->alloc_pool.list), struct note_alloc_tracker, list);
+            if (!note_track) {
                 return -1;
             }
 
@@ -207,7 +240,7 @@ static int alloc_free_unit(void* reg_base, int ch, int note, int vel)
             note_track->vel     = vel;
 
             // Add entry for note tracker
-            list_add_tail(&(note_track->list), &zed_ch_data[ch].note_alloc.list);
+            list_move_tail(&note_track->list, &zed_ch_data[ch].note_alloc.list);
             return cur_pos;
         }
     }
@@ -236,7 +269,7 @@ void zed_pl_synth_note_on(void *p, int note, int vel, struct snd_midi_channel *c
     mutex_lock(&prv->access_mutex);
 
     // Allocate unit and add entry to tracker
-    unit_no = alloc_free_unit(prv->addr_base, ch, note, vel);
+    unit_no = alloc_free_unit(prv, ch, note, vel);
     if (unit_no >= 0) {
         struct zed_pl_unit_reg *regs = prv->addr_base;
 
@@ -255,7 +288,7 @@ void zed_pl_synth_note_on(void *p, int note, int vel, struct snd_midi_channel *c
     mutex_unlock(&prv->access_mutex);
 }
 
-static int free_unit(int ch, int note)
+static int free_unit(struct zed_pl_card_data *prv, int ch, int note)
 {
     struct note_alloc_tracker *wp1, *wp2;
     if (ch >= ZED_PL_SYNTH_MIDI_CH) {
@@ -268,8 +301,9 @@ static int free_unit(int ch, int note)
     list_for_each_entry_safe(wp1, wp2, &(zed_ch_data[ch].note_alloc.list), list) {
         if (wp1->note == note) {
             int unit_no = wp1->unit_no;
-            list_del(&(wp1->list));
-            kfree(wp1);
+
+            // Return the free node to the pool
+            list_move_tail(&(wp1->list), &(prv->alloc_pool.list));
             return unit_no;
         }
     }
@@ -292,7 +326,7 @@ void zed_pl_synth_note_off(void *p, int note, int vel, struct snd_midi_channel *
     mutex_lock(&prv->access_mutex);
 
     // Find target unit
-    unit_no = free_unit(chan->number, note);
+    unit_no = free_unit(prv, chan->number, note);
     if (unit_no >= 0) {
         struct zed_pl_unit_reg *regs = prv->addr_base;
         const int ch = chan->number;

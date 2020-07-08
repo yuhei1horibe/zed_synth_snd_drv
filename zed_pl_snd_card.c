@@ -366,8 +366,12 @@ static int zed_snd_probe(struct platform_device *pdev)
 
     if (prv->chset->port < 0) {
         dev_err(&pdev->dev, "Failed to attach sequencer port.");
-		snd_midi_channel_free_set(prv->chset);
-        return prv->chset->port;
+        goto unreg_class;
+    }
+
+    if (zed_pl_synth_init_alloc_pool(prv) < 0) {
+        dev_err(&pdev->dev, "Failed to allocate note tracker pool.");
+        goto unreg_class;
     }
 
     dev_info(&pdev->dev, "Zedboard PL synthesizer midi module registered");
@@ -383,6 +387,7 @@ unreg_class:
         kfree(card);
     }
     if (prv) {
+        zed_pl_synth_release_alloc_pool(prv);
         kfree(prv->info);
         kfree(prv);
         if (prv->chset) {
@@ -408,6 +413,7 @@ static int zed_snd_remove(struct platform_device *pdev)
     // Free up MIDI resources
     kfree(prv->info);
     kfree(prv);
+    zed_pl_synth_release_alloc_pool(prv);
     if (prv->chset) {
         snd_midi_channel_free_set(prv->chset);
     }
