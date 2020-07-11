@@ -66,6 +66,7 @@ void zed_pl_synth_free_port(void *private_data);
 int zed_pl_synth_event_input(struct snd_seq_event *ev, int direct, void *private_data, int atomic, int hop);
 
 // Midi emulator
+void zed_pl_synth_program_change(struct zed_pl_card_data *prv, int ch, int pgm_num);
 void zed_pl_synth_note_on(void *p, int note, int vel, struct snd_midi_channel *chan);
 void zed_pl_synth_note_off(void *p, int note, int vel, struct snd_midi_channel *chan);
 void zed_pl_synth_key_press(void *p, int note, int vel, struct snd_midi_channel *chan);

@@ -39,6 +39,158 @@ static const int note_freq[] = {
     7902, 8372, 8870, 9397, 9956, 10548, 11175, 11840, 12544
 };
 
+// Preset tone parameters
+struct zed_pl_params {
+    uint32_t wave_type;
+    union {
+        struct {
+            uint32_t vca_attack  : 8;
+            uint32_t vca_decay   : 8;
+            uint32_t vca_sustain : 8;
+            uint32_t vca_release : 8;
+        } bit;
+        uint32_t vca_eg_all;
+    } vca_eg;
+};
+
+// Preset parameters
+static struct zed_pl_params zed_pl_synth_preset_tones[] = {
+    { 0, {{ 0x80, 0x02, 0x08, 0x02 }}, }, // 001: Acoustic grand
+    { 1, {{ 0x80, 0x02, 0x08, 0x02 }}, }, // 002: Bright acoustic
+    { 2, {{ 0x80, 0x02, 0x40, 0x02 }}, }, // 003: Electric grand
+    { 1, {{ 0x40, 0x02, 0x40, 0x02 }}, }, // 004: Honky tonk
+    { 2, {{ 0x20, 0x02, 0x30, 0x02 }}, }, // 005: Electric Piano 1
+    { 2, {{ 0x10, 0x02, 0x30, 0x02 }}, }, // 006: Electric Piano 2
+    { 1, {{ 0x80, 0x10, 0x20, 0x02 }}, }, // 007: Harpsichord
+    { 1, {{ 0x80, 0x10, 0x20, 0x02 }}, }, // 008: Clavinet
+
+    { 2, {{ 0x80, 0x01, 0x20, 0x01 }}, }, // 009: Celesta
+    { 2, {{ 0x80, 0x01, 0x20, 0x01 }}, }, // 010: Glockenspiel
+    { 2, {{ 0x80, 0x01, 0x20, 0x01 }}, }, // 011: Music Box
+    { 2, {{ 0x80, 0x01, 0x20, 0x01 }}, }, // 012: Vibraphone
+    { 2, {{ 0x80, 0x01, 0x20, 0x01 }}, }, // 013: Marimba
+    { 2, {{ 0x80, 0x01, 0x20, 0x01 }}, }, // 014: Xylophone
+    { 2, {{ 0x80, 0x01, 0x20, 0x01 }}, }, // 015: Tubular Bells
+    { 2, {{ 0x80, 0x01, 0x20, 0x01 }}, }, // 016: Dulcimer
+
+    { 1, {{ 0xFF, 0x10, 0x40, 0x01 }}, }, // 017: Drawbar Organ
+    { 1, {{ 0xFF, 0x10, 0x40, 0x01 }}, }, // 018: Percussive Organ
+    { 1, {{ 0xFF, 0x10, 0x40, 0x01 }}, }, // 019: Rock Organ
+    { 1, {{ 0xFF, 0x10, 0x40, 0x01 }}, }, // 020: Church Organ
+    { 1, {{ 0xFF, 0x10, 0x40, 0x01 }}, }, // 021: Reed Organ
+    { 1, {{ 0xFF, 0x10, 0x40, 0x01 }}, }, // 022: Accoridan
+    { 1, {{ 0xFF, 0x10, 0x40, 0x01 }}, }, // 023: Harmonica
+    { 1, {{ 0xFF, 0x10, 0x40, 0x01 }}, }, // 024: Tango Accordian
+
+    { 0, {{ 0x80, 0x04, 0x08, 0x02 }}, }, // 025: Nylon String Guitar
+    { 0, {{ 0xC0, 0x04, 0x08, 0x02 }}, }, // 026: Steel String Guitar
+    { 0, {{ 0x80, 0x04, 0x08, 0x02 }}, }, // 027: Electric Jazz Guitar
+    { 0, {{ 0x80, 0x04, 0x08, 0x02 }}, }, // 028: Electric Clean Guitar
+    { 0, {{ 0x80, 0x04, 0x04, 0x02 }}, }, // 029: Electric Muted Guitar
+    { 0, {{ 0x80, 0x40, 0x40, 0x02 }}, }, // 030: Overdriven Guitar
+    { 0, {{ 0xA0, 0x40, 0x40, 0x02 }}, }, // 031: Distortion Guitar
+    { 0, {{ 0x80, 0x04, 0x08, 0x02 }}, }, // 032: Guitar Harmonics
+
+    { 2, {{ 0x40, 0x08, 0x08, 0x02 }}, }, // 033: Acoustic Bass
+    { 0, {{ 0xC0, 0x08, 0x10, 0x02 }}, }, // 034: Electric Bass(finger)
+    { 0, {{ 0x80, 0x08, 0x20, 0x02 }}, }, // 035: Electric Bass(pick)
+    { 0, {{ 0x40, 0x08, 0x20, 0x02 }}, }, // 036: Fretless Bass
+    { 1, {{ 0x80, 0x08, 0x30, 0x02 }}, }, // 037: Slap Bass 1
+    { 1, {{ 0x80, 0x08, 0x30, 0x02 }}, }, // 038: Slap Bass 2
+    { 2, {{ 0xFF, 0x08, 0x30, 0x02 }}, }, // 039: Synth Bass 1
+    { 2, {{ 0xFF, 0x08, 0x30, 0x02 }}, }, // 040: Synth Bass 2
+
+    { 1, {{ 0x10, 0x02, 0x80, 0x02 }}, }, // 041: Violin
+    { 1, {{ 0x10, 0x02, 0x80, 0x02 }}, }, // 042: Viola
+    { 1, {{ 0x10, 0x02, 0x80, 0x02 }}, }, // 043: Cello
+    { 1, {{ 0x10, 0x02, 0x80, 0x02 }}, }, // 044: Contrabass
+    { 1, {{ 0x40, 0x08, 0x04, 0x02 }}, }, // 045: Tremolo Strings
+    { 1, {{ 0x40, 0x08, 0x04, 0x02 }}, }, // 046: Pizzicato Strings
+    { 1, {{ 0x10, 0x08, 0x80, 0x02 }}, }, // 047: Orchestral Strings
+    { 2, {{ 0x40, 0x08, 0x08, 0x02 }}, }, // 048: Timpani
+
+    { 1, {{ 0x08, 0x01, 0x80, 0x01 }}, }, // 049: String Ensemble 1
+    { 1, {{ 0x08, 0x01, 0x80, 0x01 }}, }, // 050: String Ensemble 2
+    { 1, {{ 0x04, 0x01, 0x80, 0x01 }}, }, // 051: SynthStrings 1
+    { 1, {{ 0x08, 0x01, 0x80, 0x02 }}, }, // 052: SynthStrings 2
+    { 1, {{ 0x20, 0x01, 0x70, 0x02 }}, }, // 053: Choir Aahs
+    { 1, {{ 0x20, 0x01, 0x70, 0x02 }}, }, // 054: Voice Oohs
+    { 1, {{ 0x20, 0x01, 0x70, 0x02 }}, }, // 055: Synth Voice
+    { 1, {{ 0xA0, 0x10, 0x08, 0x20 }}, }, // 056: Orchestra Hit
+
+    { 1, {{ 0xA0, 0x20, 0x40, 0x10 }}, }, // 057: Trumpet
+    { 1, {{ 0xA0, 0x20, 0x40, 0x10 }}, }, // 058: Trombone
+    { 1, {{ 0xA0, 0x20, 0x40, 0x10 }}, }, // 059: Tuba
+    { 1, {{ 0xA0, 0x20, 0x08, 0x10 }}, }, // 060: Muted Trumpet
+    { 1, {{ 0xA0, 0x20, 0x40, 0x10 }}, }, // 061: French Horn
+    { 1, {{ 0xA0, 0x20, 0x40, 0x10 }}, }, // 062: Brass Section
+    { 1, {{ 0xA0, 0x20, 0x40, 0x10 }}, }, // 063: SynthBrass 1
+    { 1, {{ 0xA0, 0x20, 0x40, 0x10 }}, }, // 064: SynthBrass 2
+
+    { 1, {{ 0xA0, 0x40, 0x20, 0x08 }}, }, // 065: Soprano Sax
+    { 1, {{ 0xA0, 0x40, 0x20, 0x08 }}, }, // 066: Alto Sax
+    { 1, {{ 0xA0, 0x40, 0x20, 0x08 }}, }, // 067: Tenor Sax
+    { 1, {{ 0xA0, 0x40, 0x30, 0x08 }}, }, // 068: Baritone Sax
+    { 1, {{ 0x40, 0x20, 0x40, 0x08 }}, }, // 069: Oboe
+    { 1, {{ 0x10, 0x40, 0x40, 0x08 }}, }, // 070: English Horn
+    { 1, {{ 0x10, 0x40, 0x40, 0x08 }}, }, // 071: Bassoon
+    { 1, {{ 0xA0, 0x40, 0x40, 0x08 }}, }, // 072: Clarinet
+
+    { 2, {{ 0x70, 0x20, 0x80, 0x08 }}, }, // 073: Piccolo
+    { 2, {{ 0x20, 0x10, 0x40, 0x08 }}, }, // 074: Flute
+    { 2, {{ 0x70, 0x20, 0x80, 0x08 }}, }, // 075: Recorder
+    { 2, {{ 0xC0, 0x20, 0x30, 0x08 }}, }, // 076: Pan Flute
+    { 2, {{ 0x30, 0x20, 0x40, 0x08 }}, }, // 077: Blown Bottle
+    { 2, {{ 0x40, 0x20, 0x20, 0x08 }}, }, // 078: Shakuhachi
+    { 2, {{ 0x70, 0x20, 0x40, 0x08 }}, }, // 079: Whistle
+    { 2, {{ 0x40, 0x20, 0x40, 0x08 }}, }, // 080: Ocarina
+
+    { 0, {{ 0x80, 0x20, 0x20, 0x08 }}, }, // 081: Square Wave
+    { 1, {{ 0x80, 0x10, 0x40, 0x08 }}, }, // 082: Saw Wave
+    { 2, {{ 0x80, 0x04, 0x80, 0x08 }}, }, // 083: Syn. Calliope
+    { 0, {{ 0x80, 0x20, 0x40, 0x08 }}, }, // 084: Chiffer Lead
+    { 0, {{ 0x80, 0x20, 0x40, 0x08 }}, }, // 085: Charang
+    { 2, {{ 0x80, 0x20, 0x40, 0x08 }}, }, // 086: Solo Vox
+    { 1, {{ 0x80, 0x20, 0x40, 0x08 }}, }, // 087: 5th Saw Wave
+    { 1, {{ 0x80, 0x20, 0x40, 0x08 }}, }, // 088: Bass& Lead
+
+    { 2, {{ 0x02, 0x02, 0x40, 0x02 }}, }, // 089: Fantasia
+    { 1, {{ 0x02, 0x02, 0x40, 0x02 }}, }, // 090: Warm Pad
+    { 2, {{ 0x02, 0x02, 0x40, 0x02 }}, }, // 091: Polysynth
+    { 2, {{ 0x02, 0x02, 0x40, 0x02 }}, }, // 092: Space Voice
+    { 2, {{ 0x02, 0x02, 0x40, 0x02 }}, }, // 093: Bowed Glass
+    { 0, {{ 0x02, 0x02, 0x20, 0x02 }}, }, // 094: Metal Pad
+    { 2, {{ 0x02, 0x02, 0x40, 0x02 }}, }, // 095: Halo Pad
+    { 1, {{ 0x02, 0x02, 0x40, 0x02 }}, }, // 096: Sweep Pad
+
+    { 1, {{ 0xFF, 0x20, 0x40, 0x02 }}, }, // 097: Ice Rain
+    { 1, {{ 0x02, 0x02, 0x40, 0x02 }}, }, // 098: Soundtrack
+    { 2, {{ 0xFF, 0x04, 0x40, 0x04 }}, }, // 099: Crystal
+    { 1, {{ 0x02, 0x02, 0x40, 0x02 }}, }, // 100: Atmosphere
+    { 1, {{ 0x02, 0x02, 0x40, 0x02 }}, }, // 101: Brightness
+    { 2, {{ 0x02, 0x02, 0x40, 0x02 }}, }, // 102: Goblin
+    { 1, {{ 0x02, 0x02, 0x40, 0x02 }}, }, // 103: Echo Drops
+    { 1, {{ 0x02, 0x02, 0x40, 0x02 }}, }, // 104: Star Theme
+
+    { 1, {{ 0x80, 0x20, 0x20, 0x08 }}, }, // 105: Sitar
+    { 0, {{ 0x80, 0x40, 0x40, 0x08 }}, }, // 106: Banjo
+    { 0, {{ 0xC0, 0x40, 0x04, 0x08 }}, }, // 107: Shamisen
+    { 2, {{ 0xA0, 0x02, 0x10, 0x08 }}, }, // 108: Koto
+    { 1, {{ 0x80, 0x02, 0x10, 0x08 }}, }, // 109: Kalimba
+    { 1, {{ 0x80, 0x40, 0x40, 0x08 }}, }, // 110: Bagpipe
+    { 1, {{ 0x20, 0x10, 0x30, 0x08 }}, }, // 111: Fiddle
+    { 1, {{ 0x40, 0x20, 0x40, 0x08 }}, }, // 112: Shanai
+
+    { 1, {{ 0x80, 0x10, 0x40, 0x08 }}, }, // 121: Guitar Fret Noise
+    { 1, {{ 0x80, 0x10, 0x40, 0x08 }}, }, // 122: Breath Noise
+    { 1, {{ 0x80, 0x10, 0x40, 0x08 }}, }, // 123: Seashore
+    { 1, {{ 0x80, 0x10, 0x40, 0x08 }}, }, // 124: Bird Tweet
+    { 1, {{ 0x80, 0x10, 0x40, 0x08 }}, }, // 125: Telephone Ring
+    { 1, {{ 0x80, 0x10, 0x40, 0x08 }}, }, // 126: Helicopter
+    { 1, {{ 0x80, 0x10, 0x40, 0x08 }}, }, // 127: Applause
+    { 1, {{ 0x80, 0x10, 0x40, 0x08 }}, }, // 128: Gunshot
+};
+
 // Register map
 // Register map per synthesizer unit
 struct zed_pl_unit_reg {
@@ -82,6 +234,9 @@ struct zed_pl_channel_data {
     int8_t                    exp;
     int8_t                    pan;
     int8_t                    mod;
+
+    // Instrument
+    int8_t                    midi_program;
 
     // Calculated volume
     int16_t                   vol_l;
@@ -268,6 +423,11 @@ void zed_pl_synth_note_on(void *p, int note, int vel, struct snd_midi_channel *c
 
     mutex_lock(&prv->access_mutex);
 
+    // Program change
+    if (chan->midi_program != zed_ch_data[ch].midi_program) {
+        zed_pl_synth_program_change(prv, ch, chan->midi_program);
+    }
+
     // Allocate unit and add entry to tracker
     unit_no = alloc_free_unit(prv, ch, note, vel);
     if (unit_no >= 0) {
@@ -352,6 +512,26 @@ void zed_pl_synth_key_press(void *p, int note, int vel, struct snd_midi_channel 
 void zed_pl_synth_terminate_note(void *p, int note, struct snd_midi_channel *chan)
 {
     zed_pl_synth_note_off(p, note, 0, chan);
+}
+
+// Program change
+void zed_pl_synth_program_change(struct zed_pl_card_data *prv, int ch, int pgm_num)
+{
+    if (!prv) {
+        return ;
+    }
+
+    if ((ch < 0) || (ch >= ZED_PL_SYNTH_MIDI_CH)) {
+        return ;
+    }
+
+    if ((pgm_num < 0) || (pgm_num > 127)) {
+        return ;
+    }
+
+    zed_ch_data[ch].unit_reg.ctl_reg.ctl_reg_all       = zed_pl_synth_preset_tones[pgm_num].wave_type;
+    zed_ch_data[ch].unit_reg.vca_eg_reg.vca_eg_reg_all = zed_pl_synth_preset_tones[pgm_num].vca_eg.vca_eg_all;
+    zed_ch_data[ch].midi_program                       = pgm_num;
 }
 
 // Handle control change and program change
