@@ -301,7 +301,7 @@ static void zed_pl_synth_calc_vol(int ch, int vel)
     exp = zed_ch_data[ch].exp;
     pan = zed_ch_data[ch].pan;
 
-    calc = ((int32_t)vol * vel * exp) / 16129; // 127 ^ 2
+    calc = ((int32_t)vol * vel * exp) / 32258; // 127 ^ 2
     zed_ch_data[ch].vol_l = (calc * (128 - pan)) / 64;
     zed_ch_data[ch].vol_r = (calc * pan) / 64;
 
@@ -487,25 +487,27 @@ void zed_pl_synth_note_off(void *p, int note, int vel, struct snd_midi_channel *
         return ;
     }
 
-    mutex_lock(&prv->access_mutex);
+    if (chan->drum_channel == 0) {
+        mutex_lock(&prv->access_mutex);
 
-    // Find target unit
-    unit_no = free_unit(prv, chan->number, note);
-    if (unit_no >= 0) {
-        struct zed_pl_unit_reg *regs = prv->addr_base;
-        const int ch = chan->number;
+        // Find target unit
+        unit_no = free_unit(prv, chan->number, note);
+        if (unit_no >= 0) {
+            struct zed_pl_unit_reg *regs = prv->addr_base;
+            const int ch = chan->number;
 
-        // Set data
-        zed_ch_data[ch].unit_reg.freq_reg.bit.freq = 0;
-        zed_ch_data[ch].unit_reg.ctl_reg.bit.trigger = false;
-        // NOTE: For release, don't touch amplitude
-        //zed_ch_data[ch].unit_reg.amp_reg.bit.amp_l = 0;
-        //zed_ch_data[ch].unit_reg.amp_reg.bit.amp_r = 0;
+            // Set data
+            zed_ch_data[ch].unit_reg.freq_reg.bit.freq = 0;
+            zed_ch_data[ch].unit_reg.ctl_reg.bit.trigger = false;
+            // NOTE: For release, don't touch amplitude
+            //zed_ch_data[ch].unit_reg.amp_reg.bit.amp_l = 0;
+            //zed_ch_data[ch].unit_reg.amp_reg.bit.amp_r = 0;
 
-        // Write to register
-        regs[unit_no] = zed_ch_data[ch].unit_reg;
+            // Write to register
+            regs[unit_no] = zed_ch_data[ch].unit_reg;
+        }
+        mutex_unlock(&prv->access_mutex);
     }
-    mutex_unlock(&prv->access_mutex);
 }
 
 void zed_pl_synth_key_press(void *p, int note, int vel, struct snd_midi_channel *chan)
