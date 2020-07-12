@@ -421,31 +421,35 @@ void zed_pl_synth_note_on(void *p, int note, int vel, struct snd_midi_channel *c
         return ;
     }
 
-    mutex_lock(&prv->access_mutex);
+    if (chan->drum_channel == 0) {
+        mutex_lock(&prv->access_mutex);
 
-    // Program change
-    if (chan->midi_program != zed_ch_data[ch].midi_program) {
-        zed_pl_synth_program_change(prv, ch, chan->midi_program);
-    }
+        // Program change
+        if (chan->midi_program != zed_ch_data[ch].midi_program) {
+            zed_pl_synth_program_change(prv, ch, chan->midi_program);
+        }
 
-    // Allocate unit and add entry to tracker
-    unit_no = alloc_free_unit(prv, ch, note, vel);
-    if (unit_no >= 0) {
-        struct zed_pl_unit_reg *regs = prv->addr_base;
+        // Allocate unit and add entry to tracker
+        unit_no = alloc_free_unit(prv, ch, note, vel);
+        if (unit_no >= 0) {
+            struct zed_pl_unit_reg *regs = prv->addr_base;
 
-        // Calculate volume
-        zed_pl_synth_calc_vol(ch, vel);
+            // Calculate volume
+            zed_pl_synth_calc_vol(ch, vel);
 
-        // Set data
-        zed_ch_data[ch].unit_reg.freq_reg.bit.freq   = note_freq[note];
-        zed_ch_data[ch].unit_reg.ctl_reg.bit.trigger = true;
-        zed_ch_data[ch].unit_reg.amp_reg.bit.amp_l   = zed_ch_data[ch].vol_l;
-        zed_ch_data[ch].unit_reg.amp_reg.bit.amp_r   = zed_ch_data[ch].vol_r;
+            // Set data
+            zed_ch_data[ch].unit_reg.freq_reg.bit.freq   = note_freq[note];
+            zed_ch_data[ch].unit_reg.ctl_reg.bit.trigger = true;
+            zed_ch_data[ch].unit_reg.amp_reg.bit.amp_l   = zed_ch_data[ch].vol_l;
+            zed_ch_data[ch].unit_reg.amp_reg.bit.amp_r   = zed_ch_data[ch].vol_r;
 
-        // Write to register
-        regs[unit_no] = zed_ch_data[ch].unit_reg;
-    }
-    mutex_unlock(&prv->access_mutex);
+            // Write to register
+            regs[unit_no] = zed_ch_data[ch].unit_reg;
+        }
+        mutex_unlock(&prv->access_mutex);
+    } //else {
+        // TODO
+    //}
 }
 
 static int free_unit(struct zed_pl_card_data *prv, int ch, int note)
