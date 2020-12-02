@@ -108,8 +108,10 @@ static int zed_snd_card_hw_params(struct snd_pcm_substream *substream,
     case 16000:
     case 24000:
     case 32000:
-    case 96000:
         pll_rate = 48000 * I2S_CLOCK_RATIO;
+        break;
+    case 96000:
+        pll_rate = 96000 * I2S_CLOCK_RATIO;
         break;
     case 44100:
     case 7350:
@@ -124,6 +126,9 @@ static int zed_snd_card_hw_params(struct snd_pcm_substream *substream,
     default:
         return -EINVAL;
     }
+    // Change clock settings
+    // TODO: Clean up
+    *(uint32_t*)(prv->addr_base + ZED_PL_SYNTH_NUM_UNITS * 4 / sizeof(uint32_t)) = (pll_rate == 96000 * I2S_CLOCK_RATIO) ? 1 : 0;
 
     ret = snd_soc_dai_set_pll(codec_dai, ADAU17X1_PLL,
             ADAU17X1_PLL_SRC_MCLK, clk_get_rate(prv->mclk), pll_rate);
