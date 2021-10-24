@@ -227,6 +227,17 @@ struct zed_pl_unit_reg {
     } amp_reg;
 };
 
+struct zed_pl_common_reg {
+    union {
+        uint32_t audio_ctl_all;
+        struct {
+            uint32_t aud_clk_sel : 1;
+            uint32_t rsvd        : 31;
+        } bit;
+    } audio_ctl_reg;
+    uint32_t unit_free_reg;
+};
+
 // Per channel data
 struct zed_pl_channel_data {
     struct zed_pl_unit_reg    unit_reg;
@@ -243,6 +254,7 @@ struct zed_pl_channel_data {
     int16_t                   vol_r;
     struct note_alloc_tracker note_alloc;
 };
+static const int ZED_PL_COMMON_REG_OFF = ZED_PL_SYNTH_NUM_UNITS * sizeof(struct zed_pl_unit_reg) / sizeof(uint32_t);
 
 // Per MIDI channel data
 static struct zed_pl_channel_data zed_ch_data[ZED_PL_SYNTH_MIDI_CH];
@@ -370,13 +382,13 @@ void zed_pl_synth_midi_reset_event(struct zed_pl_card_data *prv)
 static int alloc_free_unit(struct zed_pl_card_data *prv, int ch, int note, int vel)
 {
     static int cur_pos = 0; // For round robin
-    struct zed_pl_unit_reg *regs = NULL;
+    struct zed_pl_common_reg *regs = NULL;
     int i;
 
     if (!prv || !prv->addr_base) {
         return -1;
     }
-    regs = prv->addr_base;
+    regs = prv->addr_base + ZED_PL_COMMON_REG_OFF;
 
     for (i = 1; i <= ZED_PL_SYNTH_NUM_UNITS; i++) {
         // It points to "unit_free_req"
