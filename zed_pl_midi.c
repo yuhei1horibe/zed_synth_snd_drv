@@ -313,13 +313,10 @@ void zed_pl_synth_midi_init(void)
     int i;
     memset(zed_ch_data, 0, sizeof(struct zed_pl_channel_data) * ZED_PL_SYNTH_MIDI_CH);
 
-    // Unit allocation tracker initialization
-    for (i = 0; i < ZED_PL_SYNTH_MIDI_CH; i++) {
-        INIT_LIST_HEAD(&(zed_ch_data[i].note_alloc.list));
-    }
-
     // Set default values for channel data
     for (i = 0; i < ZED_PL_SYNTH_MIDI_CH; i++) {
+        INIT_LIST_HEAD(&(zed_ch_data[i].note_alloc.list));
+
         struct zed_pl_unit_reg *reg = &zed_ch_data[i].unit_reg;
         zed_ch_data[i].vol = 100;
         reg->ctl_reg.bit.wave_type      = ZED_PL_WAVE_SAW;
@@ -382,8 +379,11 @@ static int alloc_free_unit(struct zed_pl_card_data *prv, int ch, int note, int v
     regs = prv->addr_base;
 
     for (i = 1; i <= ZED_PL_SYNTH_NUM_UNITS; i++) {
+        // It points to "unit_free_req"
+        uint32_t *unit_free_reg_off = prv->addr_base + sizeof(struct zed_pl_unit_reg) * ZED_PL_SYNTH_NUM_UNITS + sizeof(uint32_t);
         int reg_off = (cur_pos + i) % ZED_PL_SYNTH_NUM_UNITS;
-        if (regs[reg_off].ctl_reg.bit.trigger == false) {
+
+        if ((*unit_free_reg_off & (1 << reg_off)) == 0) {
             struct note_alloc_tracker *note_track = list_first_entry(&(prv->alloc_pool.list), struct note_alloc_tracker, list);
             if (!note_track) {
                 return -1;
